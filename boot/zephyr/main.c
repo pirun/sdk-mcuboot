@@ -20,6 +20,7 @@
 #include <zephyr.h>
 #include <drivers/gpio.h>
 #include <sys/__assert.h>
+#include <sys/util.h>
 #include <drivers/flash.h>
 #include <drivers/timer/system_timer.h>
 #include <usb/usb_device.h>
@@ -33,6 +34,10 @@
 #include "bootutil/bootutil.h"
 #include "bootutil/fault_injection_hardening.h"
 #include "flash_map_backend/flash_map_backend.h"
+
+#ifdef CONFIG_MCUBOOT_SD_UPDATE
+#include "sd_update.h"
+#endif
 
 #ifdef CONFIG_FW_INFO
 #include <fw_info.h>
@@ -538,11 +543,27 @@ void main(void)
     }
 #endif
 
+IF_ENABLED(CONFIG_MCUBOOT_SD_UPDATE, (
+    bool updated = sdu_do_update();
+))
+
     FIH_CALL(boot_go, fih_rc, &rsp);
     if (fih_not_eq(fih_rc, FIH_SUCCESS)) {
+    #ifdef CONFIG_MCUBOOT_SD_UPDATE
+        if (updated) {
+            BOOT_LOG_INF("Failed to boot updated firmware, attemptin revert...");
+            int res = sdu_revert_update();
+            if (res == 0) {
+                BOOT_LOG_INF("Revert successful, booting original firmware");
+                rc = boot_go(&rsp);
+            }
+        }
+    #else
         BOOT_LOG_ERR("Unable to find bootable image");
+    #endif
         FIH_PANIC;
     }
+
 
     BOOT_LOG_INF("Bootloader chainload address offset: 0x%x",
                  rsp.br_image_off);

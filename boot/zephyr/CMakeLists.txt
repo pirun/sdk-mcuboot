@@ -230,6 +230,7 @@ elseif(CONFIG_BOOT_SIGNATURE_TYPE_ED25519 OR CONFIG_BOOT_ENCRYPT_X25519)
     ${FIAT_DIR}/src/curve25519.c
   )
 endif()
+zephyr_library_sources_ifdef(CONFIG_MCUBOOT_SD_UPDATE sd_update.c)
 
 if(CONFIG_BOOT_ENCRYPT_EC256 OR CONFIG_BOOT_ENCRYPT_X25519)
   zephyr_library_sources(

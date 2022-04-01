@@ -445,6 +445,47 @@ module = MCUBOOT
 module-str = MCUBoot bootloader
 source "subsys/logging/Kconfig.template.log_config"
 
+menuconfig MCUBOOT_SD_UPDATE
+	bool "MCUboot firmware update from SD card"
+	default n
+	select DISK_DRIVERS
+	select DISK_DRIVER_SDMMC
+	select SDMMC_OVER_SPI
+	select DISK_ACCESS
+	select FILE_SYSTEM
+	select FAT_FILESYSTEM_ELM
+	#select FS_FATFS_EXFAT
+	help
+		If y, enables updating the image from an SD card.
+
+if MCUBOOT_SD_UPDATE
+
+config SD_UPDATE_MOUNT_POINT
+	string "SD card mount point"
+	default "/SD:"
+	help
+		Indicates where the SD card will be mounted.
+
+config SD_UPDATE_DIRECTORY_NAME
+	string "Update directory"
+	default ""
+	help
+		Directory on the SD card where the image update is stored. Empty for root.
+
+config SD_UPDATE_IMAGE_FILE_NAME
+	string "Name of the image update file"
+	default "UPDATE.BIN"
+	help
+		Name of the file containing the image update.
+
+config SD_UPDATE_BACKUP_FILE_NAME
+	string "Name of the image backup file"
+	default "BACKUP.BIN"
+	help
+		Name of the file to which the backup of the current image will be written.
+
+endif	# MCUBOOT_SD_UPDATE
+
 config MCUBOOT_LOG_THREAD_STACK_SIZE
 	int "Stack size for the MCUBoot log processing thread"
 	depends on LOG && !LOG_IMMEDIATE
