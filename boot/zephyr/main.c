@@ -552,7 +552,7 @@ IF_ENABLED(CONFIG_MCUBOOT_SD_UPDATE, (
     #ifdef CONFIG_MCUBOOT_SD_UPDATE
         if (updated) {
             BOOT_LOG_INF("Failed to boot updated firmware, attemptin revert...");
-            int res = sdu_revert_update();
+            int res = sdu_revert_app_update();
             if (res == 0) {
                 BOOT_LOG_INF("Revert successful, booting original firmware");
                 rc = boot_go(&rsp);

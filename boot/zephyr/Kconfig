@@ -471,19 +471,40 @@ config SD_UPDATE_DIRECTORY_NAME
 	default ""
 	help
 		Directory on the SD card where the image update is stored. Empty for root.
+config SD_UPDATE_APP_CORE
+	bool "Update App core from SDCARD"
+	default n
+	help
+		 Enable update APP core from SD card
+config SD_UPDATE_NET_CORE
+	bool "Update Net core from SDCARD"
+	default y
+	help
+		 Enable update Net core from SD card
 
-config SD_UPDATE_IMAGE_FILE_NAME
-	string "Name of the image update file"
-	default "UPDATE.BIN"
+config SD_UPDATE_APP_CORE_IMAGE_FILE_NAME
+	string "Name of the app core image update file"
+	default "APP.BIN"
 	help
 		Name of the file containing the image update.
 
-config SD_UPDATE_BACKUP_FILE_NAME
-	string "Name of the image backup file"
-	default "BACKUP.BIN"
+config SD_UPDATE_APP_CORE_BACKUP_FILE_NAME
+	string "Name of the app core image backup file"
+	default "APPBAK.BIN"
 	help
 		Name of the file to which the backup of the current image will be written.
 
+config SD_UPDATE_NET_CORE_IMAGE_FILE_NAME
+	string "Name of the app core image update file"
+	default "NET.BIN"
+	help
+		Name of the file containing the image update.
+
+config SD_UPDATE_NET_CORE_BACKUP_FILE_NAME
+	string "Name of the app core image backup file"
+	default "NETBAK.BIN"
+	help
+		Name of the file to which the backup of the current image will be written.
 endif	# MCUBOOT_SD_UPDATE
 
 config MCUBOOT_LOG_THREAD_STACK_SIZE
