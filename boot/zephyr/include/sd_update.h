@@ -8,6 +8,7 @@ static struct sd_update {
     struct image_header header;
     struct fs_file_t update_file;
     bool has_update;
+    bool updated;
 };
 
 #define APP_CORE 0

@@ -455,6 +455,9 @@ menuconfig MCUBOOT_SD_UPDATE
 	select FILE_SYSTEM
 	select FAT_FILESYSTEM_ELM
 	#select FS_FATFS_EXFAT
+	select SD_UPDATE_APP_CORE
+	select SD_UPDATE_NET_CORE
+	depends on SOC_SERIES_NRF53X
 	help
 		If y, enables updating the image from an SD card.
 
@@ -478,7 +481,7 @@ config SD_UPDATE_APP_CORE
 		 Enable update APP core from SD card
 config SD_UPDATE_NET_CORE
 	bool "Update Net core from SDCARD"
-	default y
+	default n
 	help
 		 Enable update Net core from SD card
 

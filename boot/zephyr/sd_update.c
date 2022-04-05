@@ -164,16 +164,28 @@ int sdu_check_update()
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
             if (entry.type == FS_DIR_ENTRY_FILE && strcasecmp(entry.name, CONFIG_SD_UPDATE_APP_CORE_IMAGE_FILE_NAME) == 0) {
             update[APP_CORE].has_update = true;
-            has_update = true;
             LOG_INF("found APP update");
-            break;
         }
 #endif
-#if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)          
+#if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
         if (entry.type == FS_DIR_ENTRY_FILE && strcasecmp(entry.name, CONFIG_SD_UPDATE_NET_CORE_IMAGE_FILE_NAME) == 0) {
             update[NET_CORE].has_update = true;
-            has_update = true;
             LOG_INF("found NET update");
+        }
+#endif
+#if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE) && IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
+        if(update[APP_CORE].has_update == true && update[NET_CORE].has_update == true) {
+            has_update = true;
+            break;
+        }
+#elif IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
+        if(update[APP_CORE].has_update) {
+            has_update = true;
+            break;
+        }
+#elif IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
+        if(update[APP_CORE].has_update) {
+            has_update = true;
             break;
         }
 #endif
@@ -188,15 +200,19 @@ int sdu_check_update()
         return -ENOENT;
     }
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
-    res = sdu_check_update_file(APP_CORE);
-    if (!res) {
-        return res;
+    if(update[APP_CORE].has_update) {
+        res = sdu_check_update_file(APP_CORE);
+        if (res !=0 ) {
+            return res;
+        }
     }
 #endif    
 #if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
-    res = sdu_check_update_file(NET_CORE);
-    if (!res) {
-        return res;
+    if(update[NET_CORE].has_update) {
+        res = sdu_check_update_file(NET_CORE);
+        if (res != 0) {
+            return res;
+        }
     }
 #endif
     return 0;
@@ -210,9 +226,10 @@ int sdu_check_update_file(uint8_t core)
     } else {
         file_name = NET_UPDATE_FILE;
     }
-    BOOT_LOG_DBG("core %d looking for %s", core, log_strdup(file_name));
+    BOOT_LOG_INF("core %d looking for %s", core, log_strdup(file_name));
 	fs_file_t_init(&update[core].update_file);
     res = fs_open(&update[core].update_file, file_name, FS_O_RDWR);
+    BOOT_LOG_INF("file %p", &update[core].update_file);
     if (res) {
         BOOT_LOG_ERR("Failed to open the core %d update image file name %s (%d)", core, res, log_strdup(file_name));
         return res;
@@ -271,6 +288,8 @@ struct tlv_iterator {
 static int tlv_iter_begin(struct sd_update *update, struct tlv_iterator *it) {
     off_t offset = update->header.ih_hdr_size + update->header.ih_img_size;
     struct image_tlv_info info;
+    BOOT_LOG_INF("file %p", &update->update_file);
+    BOOT_LOG_INF("tlv begin offset %d", offset);
     int res = fs_seek(&update->update_file, offset, FS_SEEK_SET);
     if (res) {
         return res;
@@ -539,7 +558,7 @@ int sdu_cleanup(uint8_t core, bool removeUpdate)
     BOOT_LOG_INF("core %d removeUpdate %d", core, removeUpdate);
     BOOT_LOG_INF("1");
     if (update[core].update_file.filep != NULL) {
-    BOOT_LOG_INF("2");
+        BOOT_LOG_INF("2");
         fs_close(&update[core].update_file);
     }
     BOOT_LOG_INF("3");
@@ -562,10 +581,9 @@ bool sdu_do_update() {
     #endif
     int res;
     bool updated = false;
-
     res = sdu_init();
     if (res) {
-        return updated;
+        return false;
     }
     lsdir(UPDATE_DIRECTORY);
     res = sdu_check_update();
@@ -573,51 +591,60 @@ bool sdu_do_update() {
         goto cleanup;
     }
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
-    res = sdu_validate_update_image(&update[APP_CORE]);
-    if (res) {
-        BOOT_LOG_ERR("Failed update app core image validation (%d)", res);
-        goto cleanup;
-    }
-    res = sdu_backup_firmware(APP_CORE);
-    if (res) {
-        BOOT_LOG_ERR("Could not backup app core current firmware, update won't continue. (%d)", res);
-        goto cleanup;
-    }
-    res = sdu_write_app_update(&update[APP_CORE]);
-    if (res) {
-        BOOT_LOG_WRN("Failed to write app update, attempting revert...");
-        res = sdu_revert_app_update();
+    if(update[APP_CORE].has_update) {
+        res = sdu_validate_update_image(&update[APP_CORE]);
         if (res) {
-            BOOT_LOG_ERR("Revert app core failed");
-        } else {
-            BOOT_LOG_INF("Revert app core successful, update has not been done");
+            BOOT_LOG_ERR("Failed update app core image validation (%d)", res);
+            goto cleanup;
         }
-    } else {
-        updated = true;
+        res = sdu_backup_firmware(APP_CORE);
+        if (res) {
+            BOOT_LOG_ERR("Could not backup app core current firmware, update won't continue. (%d)", res);
+            goto cleanup;
+        }
+        res = sdu_write_app_update(&update[APP_CORE]);
+        if (res) {
+            BOOT_LOG_WRN("Failed to write app update, attempting revert...");
+            res = sdu_revert_app_update();
+            if (res) {
+                BOOT_LOG_ERR("Revert app core failed");
+            } else {
+                BOOT_LOG_INF("Revert app core successful, update has not been done");
+            }
+        } else {
+            //fs_close(&update[APP_CORE].update_file);
+            updated = true;
+            update[APP_CORE].updated = true;
+        }
     }
 #endif
 #if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
-    res = sdu_validate_update_image(&update[NET_CORE]);
-    if (res) {
-        BOOT_LOG_ERR("Failed update net core image validation (%d)", res);
-        goto cleanup;
-    }
-    res = sdu_backup_firmware(NET_CORE);
-    if (res) {
-        BOOT_LOG_ERR("Could not backup net core current firmware, update won't continue. (%d)", res);
-        goto cleanup;
-    }
-    res = sdu_write_net_update(&update[NET_CORE]);
-    if (res) {
-        BOOT_LOG_WRN("Failed to write net update, attempting revert... (%d)", res);
-        res = sdu_revert_net_update();
+    if(update[NET_CORE].has_update) {
+        res = sdu_validate_update_image(&update[NET_CORE]);
         if (res) {
-            BOOT_LOG_ERR("Revert failed");
-        } else {
-            BOOT_LOG_INF("Revert successful, update has not been done");
+            BOOT_LOG_ERR("Failed update net core image validation (%d)", res);
+            goto cleanup;
         }
-    } else {
-        updated = true;
+        res = sdu_backup_firmware(NET_CORE);
+        if (res) {
+            BOOT_LOG_ERR("Could not backup net core current firmware, update won't continue. (%d)", res);
+            goto cleanup;
+        }
+        res = sdu_write_net_update(&update[NET_CORE]);
+        BOOT_LOG_INF("sdu_write_net_update res %d", res);
+        if (res) {
+            BOOT_LOG_WRN("Failed to write net update, attempting revert... (%d)", res);
+            res = sdu_revert_net_update();
+            if (res) {
+                BOOT_LOG_ERR("Revert failed");
+            } else {
+                BOOT_LOG_INF("Revert successful, update has not been done");
+            }
+        } else {
+            //fs_close(&update[NET_CORE].update_file);
+            updated = true;
+            update[NET_CORE].updated = true;
+        }
     }
 #endif
 
@@ -626,16 +653,17 @@ cleanup:
     BOOT_LOG_INF("sdu_cleanup");
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
     if(update[APP_CORE].has_update) {
-        sdu_cleanup(APP_CORE, updated);
+        sdu_cleanup(APP_CORE, update[APP_CORE].updated);
     }
 #endif
 #if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
     if(update[NET_CORE].has_update) {
-        sdu_cleanup(NET_CORE, updated);
+        sdu_cleanup(NET_CORE, update[NET_CORE].updated);
     }
 #endif
     BOOT_LOG_INF("SD update finished");
     fs_unmount(&mp);
+
     return updated;
 }
 static int lsdir(const char *path)
@@ -687,6 +715,7 @@ static int write_net_image(struct fs_file_t *file) {
     struct image_header *hdr;
     off_t offset = 0;
     bool dump = true;
+
     BOOT_LOG_INF("Writing net core image to MCUBOOT_SECONDARY...");
     area_id = flash_area_id_from_image_slot(BOOT_SECONDARY_SLOT);
     res = flash_area_open(area_id, &fap);
@@ -710,11 +739,11 @@ static int write_net_image(struct fs_file_t *file) {
         if (read < buf_size) {
             memset(buf + read, 0xFF, buf_size - read);
         }
-        if(dump){
-            LOG_HEXDUMP_INF(buf, read, "write_net_image");
-            LOG_HEXDUMP_INF(fap->fa_off, read, "read_flash");
-            dump = false;
-        }
+        // if(dump){
+        //     LOG_HEXDUMP_INF(buf, read, "write_net_image");
+        //     LOG_HEXDUMP_INF(fap->fa_off, read, "read_flash");
+        //     dump = false;
+        // }
 
         res = flash_area_write(fap, offset, buf, buf_size);
         if (res) {
@@ -730,10 +759,10 @@ static int write_net_image(struct fs_file_t *file) {
     const struct flash_area *secondary_fa;
     flash_area_open(area_id, &secondary_fa);
     hdr = (struct image_header *)secondary_fa->fa_off;
-    if(dump){
-            LOG_HEXDUMP_INF(secondary_fa->fa_off, buf_size, "dump from secondary");
-            dump = false;
-    }
+    // if(dump){
+    //         LOG_HEXDUMP_INF(secondary_fa->fa_off, buf_size, "dump from secondary");
+    //         dump = false;
+    // }
     LOG_INF("hdr address 0%08x", secondary_fa->fa_off);
     if (hdr->ih_magic == IMAGE_MAGIC) {
         LOG_INF("flash area has valid IMAGE_MAGIC");
@@ -748,7 +777,7 @@ static int write_net_image(struct fs_file_t *file) {
         LOG_INF("reset_addr 0x%08x", vtable[1]);
         if (reset_addr > PM_CPUNET_B0N_ADDRESS) {
             if(true) {//if (wait) {
-                res =  pcd_network_core_update(vtable, fw_size);
+                res = pcd_network_core_update(vtable, fw_size);
             } else {
                 res = pcd_network_core_update_initiate(vtable, fw_size);
             }
