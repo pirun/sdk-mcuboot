@@ -16,7 +16,7 @@
 #include "sd_update.h"
 
 MCUBOOT_LOG_MODULE_REGISTER(sd_update);
-
+//#define CORE_APP_CONFIG
 #define PATH_SEPARATOR "/"
 #define UPDATE_DIRECTORY CONFIG_SD_UPDATE_MOUNT_POINT PATH_SEPARATOR CONFIG_SD_UPDATE_DIRECTORY_NAME
 #define APP_UPDATE_FILE UPDATE_DIRECTORY PATH_SEPARATOR CONFIG_SD_UPDATE_APP_CORE_IMAGE_FILE_NAME
@@ -47,11 +47,11 @@ static struct sd_update update[CORE_NUMS];
 #define RET_IF_ERR_MSG(err_code, msg)                                                              \
 	do {                                                                                       \
 		if (err_code) {                                                                    \
-			LOG_ERR("%s", msg);                                                        \
+			BOOT_LOG_ERR("%s", msg);                                                        \
 			return err_code;                                                           \
 		}                                                                                  \
 	} while (0)
-static int lsdir(const char *path);
+#ifdef CORE_APP_CONFIG
 static int core_app_config(void)
 {
 	int ret;
@@ -59,7 +59,7 @@ static int core_app_config(void)
 	nrf_gpiote_latency_t latency = nrfx_gpiote_latency_get();
 
 	if (latency != NRF_GPIOTE_LATENCY_LOWPOWER) {
-		LOG_DBG("Setting gpiote latency to low power");
+		BOOT_LOG_DBG("Setting gpiote latency to low power");
 		nrfx_gpiote_latency_set(NRF_GPIOTE_LATENCY_LOWPOWER);
 	}
 
@@ -88,6 +88,7 @@ static int core_app_config(void)
 
 	return 0;
 }
+#endif
 int sdu_init()
 {
     static const char *disk_pdrv = "SD";
@@ -95,8 +96,9 @@ int sdu_init()
 	uint64_t sd_card_size_bytes;
 	uint32_t sector_count;
 	size_t sector_size;
-
+#ifdef CORE_APP_CONFIG
     err = core_app_config();
+#endif
     if(err) {
         BOOT_LOG_ERR("Failed to initial core app gpio");
     }
@@ -109,14 +111,14 @@ int sdu_init()
     }
 	err = disk_access_ioctl(disk_pdrv, DISK_IOCTL_GET_SECTOR_COUNT, &sector_count);
 	RET_IF_ERR_MSG(err, "Unable to get sector count");
-	LOG_DBG("Sector count: %d", sector_count);
+	BOOT_LOG_DBG("Sector count: %d", sector_count);
 
 	err = disk_access_ioctl(disk_pdrv, DISK_IOCTL_GET_SECTOR_SIZE, &sector_size);
 	RET_IF_ERR_MSG(err, "Unable to get sector size");
-	LOG_DBG("Sector size: %d bytes", sector_size);
+	BOOT_LOG_DBG("Sector size: %d bytes", sector_size);
 
 	sd_card_size_bytes = (uint64_t)sector_count * sector_size;
-	LOG_INF("SD card volume size: %d MB", (uint32_t)(sd_card_size_bytes >> 20));
+	BOOT_LOG_INF("SD card volume size: %d MB", (uint32_t)(sd_card_size_bytes >> 20));
 
     err = fs_mount(&mp);
     if (err == FR_OK) {
@@ -164,13 +166,13 @@ int sdu_check_update()
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
             if (entry.type == FS_DIR_ENTRY_FILE && strcasecmp(entry.name, CONFIG_SD_UPDATE_APP_CORE_IMAGE_FILE_NAME) == 0) {
             update[APP_CORE].has_update = true;
-            LOG_INF("found APP update");
+            BOOT_LOG_INF("found APP update");
         }
 #endif
 #if IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
         if (entry.type == FS_DIR_ENTRY_FILE && strcasecmp(entry.name, CONFIG_SD_UPDATE_NET_CORE_IMAGE_FILE_NAME) == 0) {
             update[NET_CORE].has_update = true;
-            LOG_INF("found NET update");
+            BOOT_LOG_INF("found NET update");
         }
 #endif
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE) && IS_ENABLED(CONFIG_SD_UPDATE_NET_CORE)
@@ -409,7 +411,8 @@ int sdu_validate_update_image(struct sd_update *update)
     BOOT_LOG_ERR("Failed to find update hash");
     return -1;
 }
-
+/** reduce code footprint*/
+#if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
 int sdu_backup_firmware(uint8_t core)
 {
     const struct flash_area *fap;
@@ -477,7 +480,22 @@ done2:
     flash_area_close(fap);
     return res;
 }
+int sdu_revert_app_update()
+{
+    struct fs_file_t backup;
+    fs_file_t_init(&backup);
+    int res = fs_open(&backup, APP_BACKUP_FILE, FS_O_RDWR);
+    if (res) {
+        BOOT_LOG_ERR("Failed to open the backup file (%d)", res);
+        return res;
+    }
 
+    res = write_app_image(&backup);
+    fs_close(&backup);
+
+    return res;
+}
+#endif
 static int write_app_image(struct fs_file_t *file) {
     const struct flash_area *fap;
     size_t buf_size = 256;
@@ -537,22 +555,6 @@ int sdu_write_app_update(struct sd_update *update) {
     return write_app_image(&update->update_file);
 }
 
-int sdu_revert_app_update()
-{
-    struct fs_file_t backup;
-    fs_file_t_init(&backup);
-    int res = fs_open(&backup, APP_BACKUP_FILE, FS_O_RDWR);
-    if (res) {
-        BOOT_LOG_ERR("Failed to open the backup file (%d)", res);
-        return res;
-    }
-
-    res = write_app_image(&backup);
-    fs_close(&backup);
-
-    return res;
-}
-
 int sdu_cleanup(uint8_t core, bool removeUpdate)
 {
     BOOT_LOG_INF("core %d removeUpdate %d", core, removeUpdate);
@@ -564,8 +566,10 @@ int sdu_cleanup(uint8_t core, bool removeUpdate)
     BOOT_LOG_INF("3");
     if (removeUpdate) {
         BOOT_LOG_INF("4");
+    #if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
         fs_unlink( ((core == APP_CORE) ? APP_UPDATE_FILE : NET_UPDATE_FILE));
         BOOT_LOG_INF("5");
+    #endif
     }
     BOOT_LOG_INF("6");
     return 0;
@@ -585,7 +589,6 @@ bool sdu_do_update() {
     if (res) {
         return false;
     }
-    lsdir(UPDATE_DIRECTORY);
     res = sdu_check_update();
     if (res) {
         goto cleanup;
@@ -597,13 +600,16 @@ bool sdu_do_update() {
             BOOT_LOG_ERR("Failed update app core image validation (%d)", res);
             goto cleanup;
         }
+    #if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
         res = sdu_backup_firmware(APP_CORE);
         if (res) {
             BOOT_LOG_ERR("Could not backup app core current firmware, update won't continue. (%d)", res);
             goto cleanup;
         }
+    #endif
         res = sdu_write_app_update(&update[APP_CORE]);
         if (res) {
+        #if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
             BOOT_LOG_WRN("Failed to write app update, attempting revert...");
             res = sdu_revert_app_update();
             if (res) {
@@ -611,6 +617,7 @@ bool sdu_do_update() {
             } else {
                 BOOT_LOG_INF("Revert app core successful, update has not been done");
             }
+        #endif
         } else {
             //fs_close(&update[APP_CORE].update_file);
             updated = true;
@@ -625,11 +632,13 @@ bool sdu_do_update() {
             BOOT_LOG_ERR("Failed update net core image validation (%d)", res);
             goto cleanup;
         }
+    #if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
         res = sdu_backup_firmware(NET_CORE);
         if (res) {
             BOOT_LOG_ERR("Could not backup net core current firmware, update won't continue. (%d)", res);
             goto cleanup;
         }
+    #endif
         res = sdu_write_net_update(&update[NET_CORE]);
         BOOT_LOG_INF("sdu_write_net_update res %d", res);
         if (res) {
@@ -648,7 +657,6 @@ bool sdu_do_update() {
     }
 #endif
 
-
 cleanup:
     BOOT_LOG_INF("sdu_cleanup");
 #if IS_ENABLED(CONFIG_SD_UPDATE_APP_CORE)
@@ -665,44 +673,6 @@ cleanup:
     fs_unmount(&mp);
 
     return updated;
-}
-static int lsdir(const char *path)
-{
-	int res;
-	struct fs_dir_t dirp;
-	static struct fs_dirent entry;
-
-	fs_dir_t_init(&dirp);
-
-	/* Verify fs_opendir() */
-	res = fs_opendir(&dirp, path);
-	if (res) {
-		printk("Error opening dir %s [%d]\n", path, res);
-		return res;
-	}
-
-	printk("\nListing dir %s ...\n", path);
-	for (;;) {
-		/* Verify fs_readdir() */
-		res = fs_readdir(&dirp, &entry);
-
-		/* entry.name[0] == 0 means end-of-dir */
-		if (res || entry.name[0] == 0) {
-			break;
-		}
-
-		if (entry.type == FS_DIR_ENTRY_DIR) {
-			printk("[DIR ] %s\n", entry.name);
-		} else {
-			printk("[FILE] %s (size = %zu)\n",
-				entry.name, entry.size);
-		}
-	}
-
-	/* Verify fs_closedir() */
-	fs_closedir(&dirp);
-
-	return res;
 }
 
 static int write_net_image(struct fs_file_t *file) {
@@ -759,22 +729,18 @@ static int write_net_image(struct fs_file_t *file) {
     const struct flash_area *secondary_fa;
     flash_area_open(area_id, &secondary_fa);
     hdr = (struct image_header *)secondary_fa->fa_off;
-    // if(dump){
-    //         LOG_HEXDUMP_INF(secondary_fa->fa_off, buf_size, "dump from secondary");
-    //         dump = false;
-    // }
-    LOG_INF("hdr address 0%08x", secondary_fa->fa_off);
+    BOOT_LOG_INF("hdr address 0%08x", secondary_fa->fa_off);
     if (hdr->ih_magic == IMAGE_MAGIC) {
-        LOG_INF("flash area has valid IMAGE_MAGIC");
+        BOOT_LOG_INF("flash area has valid IMAGE_MAGIC");
         uint32_t fw_size = hdr->ih_img_size;
         uint32_t vtable_addr = (uint32_t)hdr + hdr->ih_hdr_size;
         uint32_t *vtable = (uint32_t *)(vtable_addr);
         uint32_t reset_addr = vtable[1];
 
-        LOG_INF("fw_size %d", fw_size);
-        LOG_INF("vtable_addr 0x%08x", vtable_addr);
-        LOG_INF("vtable 0x%08x", vtable);
-        LOG_INF("reset_addr 0x%08x", vtable[1]);
+        BOOT_LOG_INF("fw_size %d", fw_size);
+        BOOT_LOG_INF("vtable_addr 0x%08x", vtable_addr);
+        BOOT_LOG_INF("vtable 0x%08x", vtable);
+        BOOT_LOG_INF("reset_addr 0x%08x", vtable[1]);
         if (reset_addr > PM_CPUNET_B0N_ADDRESS) {
             if(true) {//if (wait) {
                 res = pcd_network_core_update(vtable, fw_size);
@@ -782,11 +748,11 @@ static int write_net_image(struct fs_file_t *file) {
                 res = pcd_network_core_update_initiate(vtable, fw_size);
             }
         } else {
-            LOG_ERR("reset_addr not b0n");
+            BOOT_LOG_ERR("reset_addr not b0n");
         }
     } else {
         /* No IMAGE_MAGIC no valid image */
-        LOG_ERR("No IMAGE_MAGIC no valid image");
+        BOOT_LOG_ERR("No IMAGE_MAGIC no valid image");
         return -ENODATA;
     }
 
@@ -805,6 +771,6 @@ int sdu_write_net_update(struct sd_update *update)
 
 int sdu_revert_net_update()
 {
-    LOG_INF("%s skip", __func__);
+    BOOT_LOG_INF("%s skip", __func__);
     return 0;
 }

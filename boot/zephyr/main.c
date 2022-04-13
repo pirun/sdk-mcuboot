@@ -550,7 +550,9 @@ IF_ENABLED(CONFIG_MCUBOOT_SD_UPDATE, (
     FIH_CALL(boot_go, fih_rc, &rsp);
     if (fih_not_eq(fih_rc, FIH_SUCCESS)) {
     #ifdef CONFIG_MCUBOOT_SD_UPDATE
+        #if !IS_ENABLED(CONFIG_FS_FATFS_READ_ONLY)
         if (updated) {
+
             BOOT_LOG_INF("Failed to boot updated firmware, attemptin revert...");
             int res = sdu_revert_app_update();
             if (res == 0) {
@@ -558,6 +560,8 @@ IF_ENABLED(CONFIG_MCUBOOT_SD_UPDATE, (
                 rc = boot_go(&rsp);
             }
         }
+        #endif
+
     #else
         BOOT_LOG_ERR("Unable to find bootable image");
     #endif
