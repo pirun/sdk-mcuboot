@@ -488,10 +488,6 @@ boot_write_status(const struct boot_loader_state *state, struct boot_status *bs)
     memset(buf, erased_val, BOOT_MAX_ALIGN);
     buf[0] = bs->state;
 
-    BOOT_LOG_DBG("writing swap status; fa_id=%d off=0x%lx (0x%lx)",
-                 flash_area_get_id(fap), (unsigned long)off,
-                 (unsigned long)flash_area_get_off(fap) + off);
-
     rc = flash_area_write(fap, off, buf, align);
     if (rc != 0) {
         rc = BOOT_EFLASH;
@@ -1053,7 +1049,7 @@ boot_validated_swap_type(struct boot_loader_state *state,
     FIH_DECLARE(fih_rc, FIH_FAILURE);
     bool upgrade_valid = false;
 
-#if defined(PM_S1_ADDRESS) || defined(CONFIG_SOC_NRF5340_CPUAPP)
+#if (defined(PM_S1_ADDRESS) || defined(CONFIG_SOC_NRF5340_CPUAPP)) && !defined(MCUBOOT_DELTA_UPGRADE)
     const struct flash_area *secondary_fa =
         BOOT_IMG_AREA(state, BOOT_SECONDARY_SLOT);
     struct image_header *hdr = boot_img_hdr(state, BOOT_SECONDARY_SLOT);
@@ -1849,6 +1845,15 @@ boot_perform_update(struct boot_loader_state *state, struct boot_status *bs)
             BOOT_SWAP_TYPE(state) = swap_type = BOOT_SWAP_TYPE_PANIC;
         }
     }
+#ifdef MCUBOOT_DELTA_UPGRADE    
+    else if (swap_type == BOOT_SWAP_TYPE_TEST)
+    {
+        rc = swap_set_image_ok(BOOT_CURR_IMG(state));
+        if (rc != 0) {
+            BOOT_SWAP_TYPE(state) = swap_type = BOOT_SWAP_TYPE_PANIC;
+        }
+    }
+#endif    
 
 #ifdef MCUBOOT_HW_ROLLBACK_PROT
     if (swap_type == BOOT_SWAP_TYPE_PERM) {
@@ -2011,6 +2016,8 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
     int rc;
     FIH_DECLARE(fih_rc, FIH_FAILURE);
 
+    printf("Before:bs->idx=%d\t bs->op=%d\t  bs->state=%d\t bs->swap_type=%d\r\n", bs->idx,bs->op,bs->state,bs->swap_type);
+
     /* Determine the sector layout of the image slots and scratch area. */
     rc = boot_read_sectors(state);
     if (rc != 0) {
@@ -2043,7 +2050,7 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
     if (boot_slots_compatible(state)) {
         boot_status_reset(bs);
 
-#ifndef MCUBOOT_OVERWRITE_ONLY
+#if (!defined MCUBOOT_OVERWRITE_ONLY) || (defined MCUBOOT_DELTA_UPGRADE)
         rc = swap_read_status(state, bs);
         if (rc != 0) {
             BOOT_LOG_WRN("Failed reading boot status; Image=%u",
@@ -2052,9 +2059,10 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
             BOOT_SWAP_TYPE(state) = BOOT_SWAP_TYPE_NONE;
             return;
         }
+        printf("After:bs->idx=%d\t bs->op=%d\t  bs->state=%d\t bs->swap_type=%d\r\n", bs->idx,bs->op,bs->state,bs->swap_type);
 #endif
 
-#ifdef MCUBOOT_SWAP_USING_MOVE
+#if (defined MCUBOOT_SWAP_USING_MOVE) && (!defined MCUBOOT_DELTA_UPGRADE)
         /*
          * Must re-read image headers because the boot status might
          * have been updated in the previous function call.
@@ -2257,6 +2265,19 @@ check_downgrade_prevention(struct boot_loader_state *state)
 #endif
 }
 
+fih_int get_source_hash(const struct flash_area *fap,uint8_t *hash_buf)
+{
+    struct image_header hdr;
+    uint8_t tmpbuf[64];
+    FIH_DECLARE(fih_rc, FIH_FAILURE);
+
+    flash_area_read(fap, 0, &hdr, sizeof(hdr));
+    // return (bootutil_img_validate(NULL, 0, &hdr, fap, tmpbuf, sizeof(tmpbuf),NULL, 0, hash_buf));
+
+    FIH_CALL(bootutil_img_validate, fih_rc, NULL, 0, &hdr, fap, tmpbuf, sizeof(tmpbuf), NULL, 0, hash_buf);
+    return fih_rc;
+}
+
 fih_ret
 context_boot_go(struct boot_loader_state *state, struct boot_rsp *rsp)
 {
@@ -2395,7 +2416,7 @@ context_boot_go(struct boot_loader_state *state, struct boot_rsp *rsp)
 
         /* Set the previously determined swap type */
         bs.swap_type = BOOT_SWAP_TYPE(state);
-
+        printf("swap_type = %d\r\n",bs.swap_type);
         switch (BOOT_SWAP_TYPE(state)) {
         case BOOT_SWAP_TYPE_NONE:
             break;

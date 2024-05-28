@@ -33,7 +33,6 @@ config BOOT_USE_TINYCRYPT
 	# When building for ECDSA, we use our own copy of mbedTLS, so the
 	# Zephyr one must not be enabled or the MBEDTLS_CONFIG_FILE macros
 	# will collide.
-	select MBEDTLS_PROMPTLESS if ZEPHYR_MBEDTLS_MODULE
 	help
 	  Use TinyCrypt for crypto primitives.
 
@@ -211,6 +210,24 @@ config BOOT_PREFER_SWAP_MOVE
 	  swap move.
 
 if !SINGLE_APPLICATION_SLOT
+#enable support application delta updates, added by Noy 2022-10-09
+config BOOT_UPGRADE_APP_DELTA
+	bool "App delta update support"
+	default n
+	help
+	  Enable support for updates to the application firmware. 
+	  If y, images in the secondary slot can be smaller than a entire application image ,
+	  it's just a patch file only the parts of the firmware that have changed instead of the whole firmware.
+
+
+# config BOOT_DELTA_DFU_WRITE_STATUS_DYNAMIC
+# 	bool "dynamically adjust status storage area during delta dfu"
+# 	depends on BOOT_UPGRADE_APP_DELTA
+# 	default n
+# 	help
+# 	  Enable support for adjusting status storage area during delta dfu dynamically. 
+# 	  If y, apply status will be saved on different pages during delta upgrade ,
+# 	  but it will need 10 more pages flash overhead than fixed storage area.
 choice BOOT_IMAGE_UPGRADE_MODE
 	prompt "Image upgrade modes"
 	default BOOT_SWAP_USING_MOVE if BOOT_PREFER_SWAP_MOVE
@@ -259,18 +276,6 @@ config BOOT_RAM_LOAD
 	  The address that the image is copied to is specified using the load-addr
 	  argument to the imgtool.py script which writes it to the image header.
 
-config BOOT_FIRMWARE_LOADER
-	bool "Firmware loader"
-	help
-	  If y, mcuboot will have a single application slot, and the secondary
-	  slot will be for a non-upgradeable firmware loaded image (e.g. for
-	  loading firmware via Bluetooth). The main application will boot by
-	  default unless there is an error with it or the boot mode has been
-	  forced to the firmware loader.
-
-	  Note: The firmware loader image must be signed with the same signing
-	  key as the primary image.
-
 endchoice
 
 # Workaround for not being able to have commas in macro arguments
@@ -309,7 +314,6 @@ config BOOT_BOOTSTRAP
 config BOOT_SWAP_SAVE_ENCTLV
 	bool "Save encrypted key TLVs instead of plaintext keys in swap metadata"
 	default n
-	depends on BOOT_ENCRYPT_IMAGE
 	help
 	  If y, instead of saving the encrypted image keys in plaintext in the
 	  swap resume metadata, save the encrypted image TLVs. This should be used
@@ -597,8 +601,6 @@ config MCUBOOT_INDICATION_LED
 	  definitions for this to work.
 
 rsource "Kconfig.serial_recovery"
-
-rsource "Kconfig.firmware_loader"
 
 config BOOT_INTR_VEC_RELOC
 	bool "Relocate the interrupt vector to the application"

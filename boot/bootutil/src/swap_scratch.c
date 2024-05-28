@@ -194,6 +194,7 @@ boot_slots_compatible(struct boot_loader_state *state)
 
     num_sectors_primary = boot_img_num_sectors(state, BOOT_PRIMARY_SLOT);
     num_sectors_secondary = boot_img_num_sectors(state, BOOT_SECONDARY_SLOT);
+    BOOT_LOG_WRN("num_sectors_primary=%d\t num_sectors_secondary=%d\n",num_sectors_primary,num_sectors_secondary);
     if ((num_sectors_primary > BOOT_MAX_IMG_SECTORS) ||
         (num_sectors_secondary > BOOT_MAX_IMG_SECTORS)) {
         BOOT_LOG_WRN("Cannot upgrade: more sectors than allowed");
@@ -233,11 +234,12 @@ boot_slots_compatible(struct boot_loader_state *state)
             i++;
         } else {
             sz1 += boot_img_sector_size(state, BOOT_SECONDARY_SLOT, j);
+            BOOT_LOG_WRN("sz0=%d\t sz1=%d\t, i=%d\t j=%d\n",sz0,sz1,i,j);
             /* Guarantee that multiple sectors of the primary slot
              * fit into the secondary slot.
              */
             if (smaller == 1) {
-                BOOT_LOG_WRN("Cannot upgrade: slots have non-compatible sectors");
+                BOOT_LOG_WRN("Cannot upgrade: slots have non-compatible sectors, smaller==1");
                 return 0;
             }
             smaller = 2;
@@ -259,9 +261,15 @@ boot_slots_compatible(struct boot_loader_state *state)
 #endif
     }
 
+    BOOT_LOG_WRN("sz0=%d\t sz1=%d\t, i=%d\t j=%d\n",num_sectors_primary,num_sectors_secondary,i,j);
+#ifndef MCUBOOT_DELTA_UPGRADE
     if ((i != num_sectors_primary) ||
         (j != num_sectors_secondary) ||
-        (primary_slot_sz != secondary_slot_sz)) {
+        (primary_slot_sz != secondary_slot_sz)) 
+#else
+    if ((i != num_sectors_primary) && (j != num_sectors_secondary))
+#endif
+    {
         BOOT_LOG_WRN("Cannot upgrade: slots are not compatible");
         return 0;
     }

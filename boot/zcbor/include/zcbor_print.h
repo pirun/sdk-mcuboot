@@ -73,17 +73,17 @@ do { \
 #endif
 
 __attribute__((used))
-static void zcbor_print_compare_lines(const uint8_t *str1, const uint8_t *str2, size_t size)
+static void zcbor_print_compare_lines(const uint8_t *str1, const uint8_t *str2, uint32_t size)
 {
-	for (size_t j = 0; j < size; j++) {
+	for (uint32_t j = 0; j < size; j++) {
 		zcbor_do_print("%x ", str1[j]);
 	}
 	zcbor_do_print("\r\n");
-	for (size_t j = 0; j < size; j++) {
+	for (uint32_t j = 0; j < size; j++) {
 		zcbor_do_print("%x ", str2[j]);
 	}
 	zcbor_do_print("\r\n");
-	for (size_t j = 0; j < size; j++) {
+	for (uint32_t j = 0; j < size; j++) {
 		zcbor_do_print("%x ", str1[j] != str2[j]);
 	}
 	zcbor_do_print("\r\n");
@@ -91,7 +91,7 @@ static void zcbor_print_compare_lines(const uint8_t *str1, const uint8_t *str2, 
 }
 
 __attribute__((used))
-static void zcbor_print_compare_strings(const uint8_t *str1, const uint8_t *str2, size_t size)
+static void zcbor_print_compare_strings(const uint8_t *str1, const uint8_t *str2, uint32_t size)
 {
 	const size_t col_width = 16;
 
@@ -104,7 +104,7 @@ static void zcbor_print_compare_strings(const uint8_t *str1, const uint8_t *str2
 }
 
 __attribute__((used))
-static void zcbor_print_compare_strings_diff(const uint8_t *str1, const uint8_t *str2, size_t size)
+static void zcbor_print_compare_strings_diff(const uint8_t *str1, const uint8_t *str2, uint32_t size)
 {
 	const size_t col_width = 16;
 	bool printed = false;
