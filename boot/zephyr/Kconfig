@@ -411,6 +411,15 @@ config BOOT_PREFER_SWAP_MOVE
 	  swap move.
 
 if !SINGLE_APPLICATION_SLOT
+#enable support application delta updates, added by Noy 2022-10-09
+config BOOT_UPGRADE_APP_DELTA
+	bool "App delta update support"
+	default n
+	help
+	  Enable support for updates to the application firmware.
+	  If y, images in the secondary slot can be smaller than a entire application image ,
+	  it's just a patch file only the parts of the firmware that have changed instead of the whole firmware.
+
 choice BOOT_IMAGE_UPGRADE_MODE
 	prompt "Image upgrade modes"
 	default BOOT_SWAP_USING_MOVE if BOOT_PREFER_SWAP_MOVE

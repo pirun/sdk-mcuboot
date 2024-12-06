@@ -470,7 +470,7 @@ if(CONFIG_BOOT_MAX_IMG_SECTORS_AUTO)
 endif()
 
 if(SYSBUILD)
-  if(CONFIG_SINGLE_APPLICATION_SLOT OR CONFIG_BOOT_FIRMWARE_LOADER OR CONFIG_BOOT_SWAP_USING_SCRATCH OR CONFIG_BOOT_SWAP_USING_MOVE OR CONFIG_BOOT_UPGRADE_ONLY OR CONFIG_BOOT_DIRECT_XIP OR CONFIG_BOOT_RAM_LOAD)
+  if(CONFIG_SINGLE_APPLICATION_SLOT OR CONFIG_BOOT_FIRMWARE_LOADER OR CONFIG_BOOT_SWAP_USING_SCRATCH OR CONFIG_BOOT_SWAP_USING_MOVE OR CONFIG_BOOT_UPGRADE_ONLY OR CONFIG_BOOT_DIRECT_XIP OR CONFIG_BOOT_RAM_LOAD OR CONFIG_BOOT_UPGRADE_APP_DELTA)
     # TODO: RAM LOAD support
     dt_nodelabel(slot0_flash NODELABEL "slot0_partition")
     dt_get_parent(slot0_flash)
@@ -622,6 +622,16 @@ zephyr_library_sources(
   ${BOOT_DIR}/zephyr/nrf_cleanup.c
 )
 endif()
+
+# support application delta dfu
+if(DEFINED CONFIG_BOOT_UPGRADE_APP_DELTA)
+    zephyr_library_sources(
+    delta_dfu_lib/src/detools.c
+    delta_dfu_lib/src/heatshrink_decoder.c
+    delta_dfu_lib/src/delta.c
+)
+endif()
+
 
 if(SYSBUILD AND CONFIG_PCD_APP)
     # Sysbuild requires details of the RAM flash device are stored to the cache of MCUboot so

@@ -28,6 +28,19 @@
 
 #include "mcuboot_config/mcuboot_config.h"
 
+#ifdef MCUBOOT_DELTA_UPGRADE
+#include "../../zephyr/delta_dfu_lib/include/delta.h"
+#define FLASH_NODEID DT_CHOSEN(zephyr_flash_controller)
+extern uint32_t patch_size;
+extern const struct device *flash_device;
+extern uint8_t opFlag;
+extern off_t status_address;
+extern struct detools_apply_patch_t apply_patch;
+/** variable used to indicate source image should be moved up how many pages before aplly */
+extern uint8_t move_up_pages;
+extern fih_int get_source_hash(const struct flash_area *fap, uint8_t *hash_buf);
+#endif
+
 BOOT_LOG_MODULE_DECLARE(mcuboot);
 
 #ifdef MCUBOOT_SWAP_USING_MOVE
@@ -259,7 +272,7 @@ static int app_max_sectors(struct boot_loader_state *state)
 int
 boot_slots_compatible(struct boot_loader_state *state)
 {
-#ifdef PM_S1_ADDRESS
+#if defined (PM_S1_ADDRESS) || defined (MCUBOOT_DELTA_UPGRADE)
     /* Patch needed for NCS. In this case, image 1 primary points to the other
      * B1 slot (ie S0 or S1), and image 0 primary points to the app.
      * With this configuration, image 0 and image 1 share the secondary slot.
@@ -373,6 +386,97 @@ swap_status_source(struct boot_loader_state *state)
     return BOOT_STATUS_SOURCE_NONE;
 }
 
+
+#ifdef MCUBOOT_DELTA_UPGRADE
+static void
+boot_move_sector_up_pages(int idx, uint32_t sz, uint8_t pages, struct boot_loader_state *state,
+        struct boot_status *bs, const struct flash_area *fap_pri,
+        const struct flash_area *fap_sec)
+{
+    uint32_t new_off;
+    uint32_t old_off;
+    int rc;
+
+    /*
+     * FIXME: assuming sectors of size == sz, a single off variable
+     * would be enough
+     */
+
+    /* Calculate offset from start of image area. */
+    new_off = boot_img_sector_off(state, BOOT_PRIMARY_SLOT, idx + pages -1);
+    old_off = boot_img_sector_off(state, BOOT_PRIMARY_SLOT, idx - 1);
+
+    if (bs->idx == BOOT_STATUS_IDX_0) {
+        if (bs->source != BOOT_STATUS_SOURCE_PRIMARY_SLOT) {
+            rc = swap_erase_trailer_sectors(state, fap_pri);
+            assert(rc == 0);
+
+            rc = swap_status_init(state, fap_pri, bs);
+            assert(rc == 0);
+        }
+
+        rc = swap_erase_trailer_sectors(state, fap_sec);
+        assert(rc == 0);
+    }
+
+    rc = boot_erase_region(fap_pri, new_off, sz);
+    assert(rc == 0);
+    // BOOT_LOG_INF("============Start sector move up at %" PRIu32 "\n", k_uptime_get_32());
+    rc = boot_copy_region(state, fap_pri, fap_pri, old_off, new_off, sz);
+    assert(rc == 0);
+    // BOOT_LOG_INF("============Start sector move up at %" PRIu32 "\n", k_uptime_get_32());
+    rc = boot_write_status(state, bs);
+
+    bs->idx++;
+    BOOT_STATUS_ASSERT(rc == 0);
+}
+
+
+static void
+boot_move_sector_down_pages(int idx, uint32_t sz, uint8_t pages, struct boot_loader_state *state,
+        struct boot_status *bs, const struct flash_area *fap_pri,
+        const struct flash_area *fap_sec)
+{
+    uint32_t new_off;
+    uint32_t old_off;
+    int rc;
+
+    /*
+     * FIXME: assuming sectors of size == sz, a single off variable
+     * would be enough
+     */
+
+    /* Calculate offset from start of image area. */
+    old_off = boot_img_sector_off(state, BOOT_PRIMARY_SLOT, idx + pages -1);
+    new_off = boot_img_sector_off(state, BOOT_PRIMARY_SLOT, idx - 1);
+
+    if (bs->idx == BOOT_STATUS_IDX_0) {
+        if (bs->source != BOOT_STATUS_SOURCE_PRIMARY_SLOT) {
+            rc = swap_erase_trailer_sectors(state, fap_pri);
+            assert(rc == 0);
+
+            rc = swap_status_init(state, fap_pri, bs);
+            assert(rc == 0);
+        }
+
+        rc = swap_erase_trailer_sectors(state, fap_sec);
+        assert(rc == 0);
+    }
+
+    rc = boot_erase_region(fap_pri, new_off, sz);
+    assert(rc == 0);
+
+    rc = boot_copy_region(state, fap_pri, fap_pri, old_off, new_off, sz);
+    assert(rc == 0);
+
+    rc = boot_write_status(state, bs);
+
+    bs->idx++;
+    BOOT_STATUS_ASSERT(rc == 0);
+}
+
+#else
+
 /*
  * "Moves" the sector located at idx - 1 to idx.
  */
@@ -459,6 +563,7 @@ boot_swap_sectors(int idx, uint32_t sz, struct boot_loader_state *state,
     }
 }
 
+#endif
 /*
  * When starting a revert the swap status exists in the primary slot, and
  * the status in the secondary slot is erased. To start the swap, the status
@@ -526,7 +631,9 @@ swap_run(struct boot_loader_state *state, struct boot_status *bs,
 
     last_idx = find_last_idx(state, copy_size);
     sector_sz = boot_img_sector_size(state, BOOT_PRIMARY_SLOT, 0);
-
+#ifdef MCUBOOT_DELTA_UPGRADE
+    // BOOT_LOG_INF("last_idx=%d\t sector_sz=%d\t Start Delta DFU at %" PRIu32 "\n", last_idx,sector_sz,k_uptime_get_32());
+#endif
     /*
      * When starting a new swap upgrade, check that there is enough space.
      */
@@ -561,17 +668,58 @@ swap_run(struct boot_loader_state *state, struct boot_status *bs,
     rc = flash_area_open(FLASH_AREA_IMAGE_SECONDARY(image_index), &fap_sec);
     assert (rc == 0);
 
+#ifdef MCUBOOT_DELTA_UPGRADE
+    uint8_t source_hash[32] = {0};
+    fih_int fih_rc = FIH_FAILURE;
+
+    flash_device = DEVICE_DT_GET(FLASH_NODEID);
+    if (!flash_device) {
+      BOOT_LOG_INF("Load flash driver failed!!!\r\n");
+      return;
+    }
+
+    fih_rc = get_source_hash(fap_pri, source_hash);
+#ifdef DELTA_ENABLE_LOG
+    if (fih_rc == FIH_SUCCESS) {
+      printf("\nsource_hash read from slot 1:\r\n");
+      for (int i = 0; i < sizeof(source_hash); i++) {
+        printf("%02X ", source_hash[i]);
+      }
+    }
+#endif
+    rc = delta_read_patch_header(source_hash, &patch_size, &opFlag);
+    if (rc < 0) {
+      printf("ret=%d	read patch file error, exit delta update process!!!\n",
+             rc);
+      flash_area_erase(fap_sec, 0,
+                       flash_area_get_size(fap_sec)); // just for test
+      return;
+    } else {
+#ifdef MCUBOOT_WRITE_STATUS_DYNAMIC
+      move_up_pages = 10 + ((patch_size / 2) / PAGE_SIZE);
+#else
+      move_up_pages =
+          (((patch_size / 2) / PAGE_SIZE > 0) ? ((patch_size / 2) / PAGE_SIZE)
+                                              : 1);
+#endif
+      printf("##patch_size = %d\t opFlag = %02X\t move_up_pages=%d\t "
+             "status_address=0X%lX\r\n",
+             patch_size, opFlag, move_up_pages, status_address);
+    }
+#endif
+
     fixup_revert(state, bs, fap_sec);
 
+#ifndef MCUBOOT_DELTA_UPGRADE
     if (bs->op == BOOT_STATUS_OP_MOVE) {
-        idx = last_idx;
-        while (idx > 0) {
-            if (idx <= (last_idx - bs->idx + 1)) {
-                boot_move_sector_up(idx, sector_sz, state, bs, fap_pri, fap_sec);
-            }
-            idx--;
+      idx = last_idx;
+      while (idx > 0) {
+        if (idx <= (last_idx - bs->idx + 1)) {
+          boot_move_sector_up(idx, sector_sz, state, bs, fap_pri, fap_sec);
         }
-        bs->idx = BOOT_STATUS_IDX_0;
+        idx--;
+      }
+      bs->idx = BOOT_STATUS_IDX_0;
     }
 
     bs->op = BOOT_STATUS_OP_SWAP;
@@ -583,6 +731,78 @@ swap_run(struct boot_loader_state *state, struct boot_status *bs,
         }
         idx++;
     }
+
+#else
+
+    // BOOT_LOG_INF("============Start sector move up at %" PRIu32 "\n", k_uptime_get_32());
+/** move up source image move_up_pages pages */
+    if (bs->op == BOOT_STATUS_OP_MOVE) {
+        idx = last_idx;
+        while (idx > 0) {
+            if (idx <= (last_idx - bs->idx + 1)) {
+                boot_move_sector_up_pages(idx, sector_sz, move_up_pages, state, bs, fap_pri, fap_sec);
+            }
+            idx--;
+        }
+        bs->idx = BOOT_STATUS_IDX_0;
+        bs->op = BOOT_STATUS_OP_APPLY;
+    }
+    // BOOT_LOG_INF("============End sector move up at %" PRIu32 "\n", k_uptime_get_32());
+
+    struct flash_mem flash_pt = {0};
+    /** This step try to find the old image pages which will be used after be erased*/
+    if(opFlag == DELTA_OP_TRAVERSE)
+    {
+        if(traverse_delta_file(&flash_pt, &apply_patch) > 0)
+        {
+            opFlag = DELTA_OP_APPLY;
+        }
+        else
+        {
+            bs->op = BOOT_STATUS_OP_RESTORE;
+            goto restore;
+        }
+    }
+    // BOOT_LOG_INF("============Traverse end at %" PRIu32 "\n", k_uptime_get_32());
+    /** Now we start to apply patch file to create new image*/
+    if(opFlag == DELTA_OP_APPLY)
+    {
+    #ifdef MCUBOOT_WRITE_STATUS_DYNAMIC
+        status_address = get_status_address();
+    #endif
+
+        rc = apply_read_status(&flash_pt);
+        if (rc < 0) {
+            bs->op = BOOT_STATUS_OP_RESTORE;
+            goto restore;
+        }
+
+        // printf("##Now start applying patch file!!!\r\n");
+
+        rc = delta_apply_init(&flash_pt,patch_size,&apply_patch);
+        if (rc < 0) {
+            bs->op = BOOT_STATUS_OP_RESTORE;
+            goto restore;
+        }
+
+        delta_check_and_apply(&flash_pt, &apply_patch);
+    }
+    // BOOT_LOG_INF("============Applying end at %" PRIu32 "\n", k_uptime_get_32());
+restore:
+    if(bs->op == BOOT_STATUS_OP_RESTORE)
+    {
+        printf("!!!There is something wrong during apply, let's restore the old image. move_down_pages=%d!!!\r\n", move_up_pages);
+        idx = 1;
+        while (idx <= last_idx) {
+            if (idx >= (bs->idx)) {
+                boot_move_sector_down_pages(idx, sector_sz, move_up_pages, state, bs, fap_pri, fap_sec);
+            }
+            idx++;
+        }
+        bs->idx = BOOT_STATUS_IDX_0;
+        bs->op = BOOT_STATUS_OP_MOVE;
+    }
+#endif
 
     flash_area_close(fap_pri);
     flash_area_close(fap_sec);
