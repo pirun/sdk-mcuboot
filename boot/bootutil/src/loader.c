@@ -74,7 +74,8 @@ int pcd_version_cmp_net(const struct flash_area *fap, struct image_header *hdr);
 #include <os/os_malloc.h>
 #endif
 
-#include "mcuboot_config/mcuboot_config.h"
+// #include "mcuboot_config/mcuboot_config.h"
+#include <stdio.h>
 
 BOOT_LOG_MODULE_DECLARE(mcuboot);
 
@@ -1498,7 +1499,7 @@ boot_validated_swap_type(struct boot_loader_state *state,
     owner_nsib[BOOT_CURR_IMG(state)] = false;
 #endif
 
-#if defined(PM_S1_ADDRESS) || defined(PM_CPUNET_B0N_ADDRESS)
+#if (defined(PM_S1_ADDRESS) || defined(PM_CPUNET_B0N_ADDRESS)) && !defined(MCUBOOT_DELTA_UPGRADE)
     const struct flash_area *secondary_fa =
         BOOT_IMG_AREA(state, BOOT_SECONDARY_SLOT);
     struct image_header *hdr = boot_img_hdr(state, BOOT_SECONDARY_SLOT);
@@ -2182,6 +2183,15 @@ boot_perform_update(struct boot_loader_state *state, struct boot_status *bs)
             BOOT_SWAP_TYPE(state) = swap_type = BOOT_SWAP_TYPE_PANIC;
         }
     }
+#ifdef MCUBOOT_DELTA_UPGRADE    
+    else if (swap_type == BOOT_SWAP_TYPE_TEST)
+    {
+        rc = swap_set_image_ok(BOOT_CURR_IMG(state));
+        if (rc != 0) {
+            BOOT_SWAP_TYPE(state) = swap_type = BOOT_SWAP_TYPE_PANIC;
+        }
+    }
+#endif 
 
 #ifdef MCUBOOT_HW_ROLLBACK_PROT
     if (swap_type == BOOT_SWAP_TYPE_PERM) {
@@ -2390,7 +2400,7 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
     if (boot_slots_compatible(state)) {
         boot_status_reset(bs);
 
-#ifndef MCUBOOT_OVERWRITE_ONLY
+#if (!defined MCUBOOT_OVERWRITE_ONLY) || (defined MCUBOOT_DELTA_UPGRADE)
         rc = swap_read_status(state, bs);
         if (rc != 0) {
             BOOT_LOG_WRN("Failed reading boot status; Image=%u",
@@ -2399,9 +2409,10 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
             BOOT_SWAP_TYPE(state) = BOOT_SWAP_TYPE_NONE;
             return;
         }
+        printf("After:bs->idx=%d\t bs->op=%d\t  bs->state=%d\t bs->swap_type=%d\r\n", bs->idx,bs->op,bs->state,bs->swap_type);
 #endif
 
-#if defined(MCUBOOT_SWAP_USING_SCRATCH) || defined(MCUBOOT_SWAP_USING_MOVE)
+#if (defined(MCUBOOT_SWAP_USING_SCRATCH) || defined(MCUBOOT_SWAP_USING_MOVE)) && (!defined MCUBOOT_DELTA_UPGRADE)
         /*
          * Must re-read image headers because the boot status might
          * have been updated in the previous function call.
@@ -2609,6 +2620,19 @@ check_downgrade_prevention(struct boot_loader_state *state)
     (void)state;
     return 0;
 #endif
+}
+
+fih_int get_source_hash(const struct flash_area *fap,uint8_t *hash_buf)
+{
+    struct image_header hdr;
+    uint8_t tmpbuf[64];
+    FIH_DECLARE(fih_rc, FIH_FAILURE);
+
+    flash_area_read(fap, 0, &hdr, sizeof(hdr));
+    // return (bootutil_img_validate(NULL, 0, &hdr, fap, tmpbuf, sizeof(tmpbuf),NULL, 0, hash_buf));
+
+    FIH_CALL(bootutil_img_validate, fih_rc, NULL, 0, &hdr, fap, tmpbuf, sizeof(tmpbuf), NULL, 0, hash_buf);
+    return fih_rc;
 }
 
 fih_ret

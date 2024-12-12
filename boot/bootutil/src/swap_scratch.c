@@ -240,7 +240,7 @@ boot_slots_compatible(struct boot_loader_state *state)
 #endif
     }
 
-#ifndef MCUBOOT_DECOMPRESS_IMAGES
+#if !defined(MCUBOOT_DECOMPRESS_IMAGES) && !defined(MCUBOOT_DELTA_UPGRADE)
     if ((i != num_sectors_primary) ||
         (j != num_sectors_secondary) ||
         (primary_slot_sz != secondary_slot_sz)) {
