@@ -35,6 +35,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "flash_map_backend/flash_map_backend.h"
 #include "bootutil/bootutil.h"
@@ -1022,7 +1023,7 @@ boot_validated_swap_type(struct boot_loader_state *state,
     owner_nsib[BOOT_CURR_IMG(state)] = false;
 #endif
 
-#if defined(PM_S1_ADDRESS) || defined(PM_CPUNET_B0N_ADDRESS)
+#if (defined(PM_S1_ADDRESS) || defined(PM_CPUNET_B0N_ADDRESS)) && !defined(MCUBOOT_DELTA_UPGRADE)
     const struct flash_area *secondary_fa = BOOT_IMG_AREA(state, BOOT_SLOT_SECONDARY);
     struct image_header *hdr = boot_img_hdr(state, BOOT_SLOT_SECONDARY);
     uint32_t reset_addr = 0;
@@ -1703,6 +1704,15 @@ boot_perform_update(struct boot_loader_state *state, struct boot_status *bs)
         }
     }
 
+#ifdef MCUBOOT_DELTA_UPGRADE
+    else if (swap_type == BOOT_SWAP_TYPE_TEST) {
+        rc = swap_set_image_ok(BOOT_CURR_IMG(state));
+        if (rc != 0) {
+            BOOT_SWAP_TYPE(state) = swap_type = BOOT_SWAP_TYPE_PANIC;
+        }
+    }
+#endif
+
 #ifdef MCUBOOT_HW_ROLLBACK_PROT
     if (swap_type == BOOT_SWAP_TYPE_PERM) {
         /* Update the stored security counter with the new image's security
@@ -1891,7 +1901,7 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
     if (boot_slots_compatible(state)) {
         boot_status_reset(bs);
 
-#ifndef MCUBOOT_OVERWRITE_ONLY
+#if (!defined MCUBOOT_OVERWRITE_ONLY) || (defined MCUBOOT_DELTA_UPGRADE)
         rc = swap_read_status(state, bs);
         if (rc != 0) {
             BOOT_LOG_WRN("Failed reading boot status; Image=%u",
@@ -1900,6 +1910,7 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
             BOOT_SWAP_TYPE(state) = BOOT_SWAP_TYPE_NONE;
             return;
         }
+        printf("After:bs->idx=%d\t bs->op=%d\t  bs->state=%d\t bs->swap_type=%d\r\n", bs->idx,bs->op,bs->state,bs->swap_type);
 #endif
 
 #if defined(MCUBOOT_SWAP_USING_SCRATCH) || defined(MCUBOOT_SWAP_USING_MOVE) || defined(MCUBOOT_SWAP_USING_OFFSET)
@@ -1958,7 +1969,8 @@ boot_prepare_image_for_update(struct boot_loader_state *state,
              * respectively be the headers of the new and previous active image. So NULL is provided
              * as boot status.
              */
-            rc = boot_read_image_headers(state, false, NULL);
+            // rc = boot_read_image_headers(state, false, NULL);
+            rc = boot_read_image_headers(state, false, bs);
             assert(rc == 0);
 
             /* Swap has finished set to NONE */
@@ -3008,3 +3020,18 @@ uint32_t boot_get_state_secondary_offset(struct boot_loader_state *state,
 #endif
 
 #endif /* !MCUBOOT_MANIFEST_UPDATES */
+
+#ifdef CONFIG_BOOT_UPGRADE_APP_DELTA
+fih_int get_source_hash(const struct flash_area *fap,uint8_t *hash_buf)
+{
+    struct image_header hdr;
+    uint8_t tmpbuf[64];
+    FIH_DECLARE(fih_rc, FIH_FAILURE);
+
+    flash_area_read(fap, 0, &hdr, sizeof(hdr));
+
+    FIH_CALL(bootutil_img_validate, fih_rc, NULL,  &hdr, fap, tmpbuf, sizeof(tmpbuf), NULL, 0, hash_buf);
+    return fih_rc;
+}
+
+#endif

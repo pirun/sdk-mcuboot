@@ -93,6 +93,10 @@ struct flash_area;
 #else
 #define BOOT_STATUS_OP_MOVE     1
 #define BOOT_STATUS_OP_SWAP     2
+#if defined(MCUBOOT_DELTA_UPGRADE)
+#define BOOT_STATUS_OP_APPLY    3
+#define BOOT_STATUS_OP_RESTORE  4
+#endif
 #endif
 
 #if (BOOT_IMAGE_NUMBER > 1)
