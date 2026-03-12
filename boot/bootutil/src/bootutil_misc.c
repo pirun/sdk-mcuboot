@@ -346,7 +346,9 @@ uint32_t bootutil_max_image_size(struct boot_loader_state *state, const struct f
 
 #if defined(MCUBOOT_SINGLE_APPLICATION_SLOT) ||      \
     defined(MCUBOOT_FIRMWARE_LOADER) ||              \
-    defined(MCUBOOT_SINGLE_APPLICATION_SLOT_RAM_LOAD)
+    defined(MCUBOOT_SINGLE_APPLICATION_SLOT_RAM_LOAD) || \
+    defined(MCUBOOT_DELTA_UPGRADE)
+
     (void) state;
     return boot_status_off(fap);
 #elif defined(MCUBOOT_SWAP_USING_MOVE) || defined(MCUBOOT_SWAP_USING_OFFSET) \
